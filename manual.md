@@ -133,10 +133,20 @@ pip install -r requirements.txt     # requirements.txt 변경 시
 
 ### exe 빌드 (배포판 만들기)
 
-클론받은 소스에서 PyInstaller로 `vanassomailing.exe` 빌드. **현재 빌드 스크립트는 포함되지 않음** — 빌드 진행 시 별도 문서화 예정. 준비물:
-- `data\vansso.png` → `.ico` 변환 (예: https://convertio.co/png-ico/)
-- `pyinstaller` 및 `waitress` 설치 (`pip install pyinstaller waitress`)
-- 엔트리포인트 스크립트(`run.py`) 작성 — 브라우저 자동 오픈, waitress 기동
+빌드 스크립트 `build.py` 포함. 사전에 `requirements.txt` 로 `pyinstaller`·`pillow`·`waitress` 설치되어 있어야 함.
+
+```bash
+python build.py
+```
+
+결과: `dist\vanassomailing\` 폴더 안에
+- `vanassomailing.exe` (약 59MB)
+- `.env.example`, `manual.md`
+- 빈 `data\` 폴더
+
+이 폴더를 통째로 복사해 배포. 받는 쪽은 `.env.example` → `.env` 작성 후 `.exe` 실행.
+
+**참고 — onefile exe 첫 실행 속도**: PyInstaller `--onefile` 은 임시 폴더에 약 100MB 압축해제 후 기동하므로 **첫 실행 시 10초 내외** 대기 필요. 이후 기동은 빠름. 백신 오탐 방지 위해 회사 IT팀에 exe 경로 화이트리스트 요청.
 
 ### 종료
 

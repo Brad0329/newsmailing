@@ -16,3 +16,4 @@ env/
 build/
 dist/
 *.spec
+vansso.ico

@@ -1,3 +1,8 @@
 flask>=3.0.0
 requests>=2.31.0
 python-dotenv>=1.0.0
+waitress>=3.0.0
+
+# 빌드 전용 (배포판에는 불필요)
+pyinstaller>=6.0.0
+pillow>=10.0.0

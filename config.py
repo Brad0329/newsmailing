@@ -1,8 +1,12 @@
 """환경변수 로드 및 검증."""
 import os
+
 from dotenv import load_dotenv
 
-load_dotenv()
+from paths import app_dir
+
+# .env 는 exe/소스 기준 디렉토리에서 로드 (PyInstaller 호환)
+load_dotenv(app_dir() / ".env")
 
 
 class ConfigError(Exception):

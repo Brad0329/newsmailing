@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
-_DATA_DIR = Path(__file__).parent / "data"
+from paths import app_dir
+
+_DATA_DIR = app_dir() / "data"
 _SETTINGS_FILE = _DATA_DIR / "settings.json"
 _HISTORY_FILE = _DATA_DIR / "history.json"
 

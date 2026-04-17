@@ -50,6 +50,23 @@ def save_keywords(keywords: str) -> None:
     _save(data)
 
 
+# 발송 시 저장되는 메일 카드 필드들. 없으면 defaults 쪽에서 폴백.
+_MAIL_FIELDS = ("sender_name", "sender_email", "subject", "intro", "signature")
+
+
+def load_mail_fields() -> dict:
+    data = _load()
+    return {k: data.get(k, "") for k in _MAIL_FIELDS}
+
+
+def save_mail_fields(fields: dict) -> None:
+    data = _load()
+    for k in _MAIL_FIELDS:
+        if k in fields:
+            data[k] = fields.get(k) or ""
+    _save(data)
+
+
 # ---------- 발송 내역 ----------
 
 

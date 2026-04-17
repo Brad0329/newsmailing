@@ -32,15 +32,17 @@ def api_history():
 
 @app.route("/api/settings", methods=["GET"])
 def api_settings():
+    saved = storage.load_mail_fields()
     return jsonify(
         {
             "recipients": storage.load_recipients(),
             "keywords": storage.load_keywords(),
-            "sender_name_default": defaults.DEFAULT_SENDER_NAME,
-            "sender_email_default": config.SMTP_FROM or "",
-            "subject_default": defaults.DEFAULT_SUBJECT,
-            "intro_default": defaults.DEFAULT_INTRO,
-            "signature_default": defaults.DEFAULT_SIGNATURE,
+            # 저장된 값이 있으면 그대로, 없으면 defaults 사용
+            "sender_name_default": saved["sender_name"] or defaults.DEFAULT_SENDER_NAME,
+            "sender_email_default": saved["sender_email"] or (config.SMTP_FROM or ""),
+            "subject_default": saved["subject"] or defaults.DEFAULT_SUBJECT,
+            "intro_default": saved["intro"] or defaults.DEFAULT_INTRO,
+            "signature_default": saved["signature"] or defaults.DEFAULT_SIGNATURE,
         }
     )
 
@@ -150,8 +152,17 @@ def api_send():
     except Exception as e:
         return jsonify({"success": False, "error": f"발송 실패: {e}"}), 500
 
-    # 성공 시 수신자 목록 저장 + 발송 내역 기록
+    # 성공 시 메일 카드 필드 전체 저장 + 발송 내역 기록
     storage.save_recipients(recipients_raw)
+    storage.save_mail_fields(
+        {
+            "sender_name": sender_name,
+            "sender_email": sender_email,
+            "subject": subject,
+            "intro": intro,
+            "signature": signature,
+        }
+    )
     storage.append_history(
         subject=subject,
         recipients_count=len(recipients),

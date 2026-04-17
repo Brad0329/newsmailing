@@ -1,5 +1,6 @@
 .env
 data/settings.json
+data/history.json
 .claude/settings.local.json
 __pycache__/
 *.pyc

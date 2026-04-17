@@ -10,7 +10,32 @@ body {
 
 .container { max-width: 1100px; margin: 0 auto; }
 
-h1 { font-size: 22px; margin: 0 0 16px; }
+h1 { font-size: 22px; margin: 0; }
+
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 16px;
+}
+
+.nav-link {
+    color: #3b5bdb;
+    text-decoration: none;
+    font-size: 14px;
+    padding: 4px 10px;
+    border: 1px solid #3b5bdb;
+    border-radius: 4px;
+}
+.nav-link:hover { background: #eef1fb; }
+
+td.empty {
+    text-align: center;
+    color: #888;
+    padding: 16px;
+}
+td.ok { color: #2b8a3e; }
+td.warn { color: #c92a2a; font-weight: 600; }
 h2 { font-size: 16px; margin: 0 0 12px; }
 h3 { font-size: 16px; margin: 0 0 8px; }
 

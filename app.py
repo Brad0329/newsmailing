@@ -20,6 +20,16 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/history")
+def history_page():
+    return render_template("history.html")
+
+
+@app.route("/api/history", methods=["GET"])
+def api_history():
+    return jsonify({"success": True, "entries": storage.load_history()})
+
+
 @app.route("/api/settings", methods=["GET"])
 def api_settings():
     return jsonify(
@@ -136,8 +146,13 @@ def api_send():
     except Exception as e:
         return jsonify({"success": False, "error": f"발송 실패: {e}"}), 500
 
-    # 성공 시 수신자 목록 저장
+    # 성공 시 수신자 목록 저장 + 발송 내역 기록
     storage.save_recipients(recipients_raw)
+    storage.append_history(
+        subject=subject,
+        recipients_count=len(recipients),
+        sent_count=sent_count,
+    )
 
     return jsonify({"success": True, "sent_count": sent_count})
 

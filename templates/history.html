@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>발송내역 — newsmailing</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <div class="topbar">
+        <h1>발송내역</h1>
+        <a href="/" class="nav-link">← 돌아가기</a>
+    </div>
+
+    <section class="card">
+        <div class="row space-between">
+            <strong id="history-summary">불러오는 중...</strong>
+        </div>
+        <table id="history-table">
+            <thead>
+            <tr>
+                <th style="width:180px">발송 일시</th>
+                <th>제목</th>
+                <th style="width:120px; text-align:right">총 수신자</th>
+                <th style="width:120px; text-align:right">발송 성공</th>
+            </tr>
+            </thead>
+            <tbody id="history-body">
+            <tr><td colspan="4" class="empty">불러오는 중...</td></tr>
+            </tbody>
+        </table>
+    </section>
+</div>
+
+<script>
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    function fmtSentAt(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return iso;
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    (async () => {
+        const body = document.getElementById('history-body');
+        const summary = document.getElementById('history-summary');
+        try {
+            const res = await fetch('/api/history');
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || '조회 실패');
+            const rows = data.entries || [];
+            if (rows.length === 0) {
+                summary.textContent = '발송 내역이 없습니다.';
+                body.innerHTML = '<tr><td colspan="4" class="empty">아직 발송된 메일이 없습니다.</td></tr>';
+                return;
+            }
+            summary.textContent = `총 ${rows.length}건`;
+            body.innerHTML = rows.map(e => {
+                const success = e.sent_count === e.recipients_count;
+                const successClass = success ? 'ok' : 'warn';
+                return `<tr>
+                    <td>${fmtSentAt(e.sent_at)}</td>
+                    <td>${escapeHtml(e.subject)}</td>
+                    <td style="text-align:right">${e.recipients_count}</td>
+                    <td style="text-align:right" class="${successClass}">${e.sent_count}</td>
+                </tr>`;
+            }).join('');
+        } catch (e) {
+            summary.textContent = '에러: ' + e.message;
+            body.innerHTML = '<tr><td colspan="4" class="empty">조회 실패</td></tr>';
+        }
+    })();
+</script>
+</body>
+</html>

@@ -10,7 +10,16 @@
 
 ---
 
-## 설치 (실행용 PC)
+## 설치 방법 두 가지
+
+**A. exe 배포판** — 일반 사용자. Python 설치 불필요. 배포 폴더 복사만.
+**B. 소스 클론** — 개발/유지보수 담당자. Git+Python 필요. 수정·재빌드 가능.
+
+둘 중 상황에 맞는 섹션을 따라가세요.
+
+---
+
+## A. 설치 (exe 배포판, 실행용 PC)
 
 배포 폴더 `vanassomailing/` 을 적당한 위치에 복사합니다. 예: `C:\Tools\vanassomailing\`
 
@@ -64,7 +73,86 @@ FLASK_DEBUG=false
 
 ---
 
-## 실행
+## B. 설치 (Git 클론, 개발자/유지보수용)
+
+소스에서 직접 실행하거나 수정·재빌드할 때 사용합니다.
+
+### 사전 요구사항
+
+- **Git** for Windows — https://git-scm.com/download/win
+- **Python 3.11+** — https://www.python.org/downloads/
+  - 설치 시 "Add Python to PATH" 체크 필수
+- **GitHub 접근 권한** — 리포지토리가 private인 경우 SSH 키 또는 Personal Access Token 필요
+
+### 클론 및 실행
+
+PowerShell 또는 명령 프롬프트에서:
+
+```bash
+# 1. 원하는 위치로 이동 (예: Documents)
+cd %USERPROFILE%\Documents
+
+# 2. 리포지토리 클론
+git clone https://github.com/Brad0329/newsmailing.git
+cd newsmailing
+
+# 3. (권장) 가상환경 생성·활성화
+python -m venv venv
+venv\Scripts\activate
+
+# 4. 의존성 설치
+pip install -r requirements.txt
+
+# 5. .env 작성 (템플릿 복사 후 편집)
+copy .env.example .env
+notepad .env        # 실제 Naver 키 / SMTP 정보 입력 후 저장
+
+# 6. 실행
+python app.py
+```
+
+정상 기동하면 콘솔에 `Running on http://127.0.0.1:5000` 메시지가 뜹니다. 브라우저로 접속해 사용.
+
+### `.env` 작성은 A 섹션 참조
+
+위 A 섹션의 "[.env 파일 작성]" 항목과 동일합니다. 포트/TLS 매핑 주의.
+
+### Naver API 키도 A 섹션 참조
+
+개발자라도 API 키는 별도 발급 필요 (계정별 호출 한도 공유됨).
+
+### 업데이트 (새 커밋 반영)
+
+```bash
+cd newsmailing
+git pull
+pip install -r requirements.txt     # requirements.txt 변경 시
+```
+
+`.env` 와 `data\settings.json` 은 로컬에 그대로 유지 (gitignore에 등록됨).
+
+### exe 빌드 (배포판 만들기)
+
+클론받은 소스에서 PyInstaller로 `vanassomailing.exe` 빌드. **현재 빌드 스크립트는 포함되지 않음** — 빌드 진행 시 별도 문서화 예정. 준비물:
+- `data\vansso.png` → `.ico` 변환 (예: https://convertio.co/png-ico/)
+- `pyinstaller` 및 `waitress` 설치 (`pip install pyinstaller waitress`)
+- 엔트리포인트 스크립트(`run.py`) 작성 — 브라우저 자동 오픈, waitress 기동
+
+### 종료
+
+콘솔 창에서 `Ctrl+C` 또는 창 닫기.
+
+### 가상환경 비활성화
+
+```bash
+deactivate
+```
+
+---
+
+## 실행 (exe 배포판)
+
+Git 클론 사용자는 B 섹션의 실행 단계를 참조하세요.
 
 ### 시작
 

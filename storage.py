@@ -40,6 +40,16 @@ def save_recipients(recipients: str) -> None:
     _save(data)
 
 
+def load_keywords() -> str:
+    return _load().get("keywords", "")
+
+
+def save_keywords(keywords: str) -> None:
+    data = _load()
+    data["keywords"] = keywords or ""
+    _save(data)
+
+
 # ---------- 발송 내역 ----------
 
 

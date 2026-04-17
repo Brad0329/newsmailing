@@ -35,6 +35,7 @@ def api_settings():
     return jsonify(
         {
             "recipients": storage.load_recipients(),
+            "keywords": storage.load_keywords(),
             "sender_name_default": defaults.DEFAULT_SENDER_NAME,
             "sender_email_default": config.SMTP_FROM or "",
             "subject_default": defaults.DEFAULT_SUBJECT,
@@ -63,6 +64,9 @@ def api_search():
         return jsonify({"success": False, "error": str(e)}), 500
     except Exception as e:
         return jsonify({"success": False, "error": f"검색 실패: {e}"}), 500
+
+    # 성공 시 입력 원문을 저장 (다음 실행 시 자동 로드)
+    storage.save_keywords(raw)
 
     return jsonify(
         {

@@ -167,6 +167,7 @@
         try {
             const res = await fetch('/api/settings');
             const data = await res.json();
+            $('keywords').value = data.keywords || '';
             $('recipients').value = data.recipients || '';
             $('sender-name').value = data.sender_name_default || '';
             $('sender-email').value = data.sender_email_default || '';

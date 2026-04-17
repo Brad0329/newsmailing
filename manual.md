@@ -107,11 +107,41 @@ pip install -r requirements.txt
 copy .env.example .env
 notepad .env        # 실제 Naver 키 / SMTP 정보 입력 후 저장
 
-# 6. 실행
-python app.py
+# 6. 실행 (두 가지 중 선택)
+python run.py        # 권장 — waitress 프로덕션 서버 + 브라우저 자동 오픈 (exe와 동일)
+# 또는
+python app.py        # 개발용 — Flask dev 서버 + 코드 수정 자동 반영
 ```
 
-정상 기동하면 콘솔에 `Running on http://127.0.0.1:5000` 메시지가 뜹니다. 브라우저로 접속해 사용.
+정상 기동하면 콘솔에 `Running on http://127.0.0.1:5000` 메시지가 뜹니다. `python run.py` 는 1.2초 뒤 기본 브라우저를 자동으로 열어줍니다. `python app.py` 는 직접 `http://127.0.0.1:5000/` 접속.
+
+### 기동 방식 비교
+
+| 항목 | `python run.py` | `python app.py` | `vanassomailing.exe` |
+|---|---|---|---|
+| 서버 | waitress (프로덕션) | Flask 내장 dev | waitress (프로덕션) |
+| 코드 변경 자동 반영 | ✗ | ✓ (reloader) | ✗ |
+| 브라우저 자동 오픈 | ✓ | ✗ | ✓ |
+| 포트 충돌 시 자동 이동 | ✓ | ✗ | ✓ |
+| Python 설치 필요 | ✓ | ✓ | ✗ |
+| 첫 기동 속도 | 빠름 | 빠름 | 느림 (~10초, %TEMP% 압축해제) |
+
+**평상 운영**: `python run.py` (exe 없이 서버 모드로 쓸 때 가장 적합)
+**개발·수정 중**: `python app.py` (코드 고치면 즉시 반영)
+**배포 PC에 Python 없음**: `vanassomailing.exe`
+
+### 다음부터 기동할 때
+
+가상환경을 썼다면:
+```bash
+cd newsmailing
+venv\Scripts\activate
+python run.py
+```
+
+### 종료
+
+콘솔 창에서 `Ctrl+C` 또는 창 닫기.
 
 ### `.env` 작성은 A 섹션 참조
 
@@ -147,10 +177,6 @@ python build.py
 이 폴더를 통째로 복사해 배포. 받는 쪽은 `.env.example` → `.env` 작성 후 `.exe` 실행.
 
 **참고 — onefile exe 첫 실행 속도**: PyInstaller `--onefile` 은 임시 폴더에 약 100MB 압축해제 후 기동하므로 **첫 실행 시 10초 내외** 대기 필요. 이후 기동은 빠름. 백신 오탐 방지 위해 회사 IT팀에 exe 경로 화이트리스트 요청.
-
-### 종료
-
-콘솔 창에서 `Ctrl+C` 또는 창 닫기.
 
 ### 가상환경 비활성화
 

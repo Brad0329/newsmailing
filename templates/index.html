@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>newsmailing</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h1>newsmailing</h1>
+
+    <section class="card">
+        <label for="keywords">검색어 (쉼표 <code>,</code>로 구분, 20개 정도 권장)</label>
+        <textarea id="keywords" rows="2" placeholder="예: 카드 보안, 핀테크, 해킹"></textarea>
+        <div class="row">
+            <label for="per-keyword" class="inline">키워드당 기사 수</label>
+            <input type="number" id="per-keyword" value="5" min="1" max="10">
+            <button id="btn-search">기사 찾기</button>
+        </div>
+        <div id="search-status" class="status"></div>
+    </section>
+
+    <section id="results-section" class="card hidden">
+        <div class="row space-between">
+            <strong id="results-summary"></strong>
+            <div>
+                <button id="btn-check-all" class="ghost">전체 선택</button>
+                <button id="btn-uncheck-all" class="ghost">전체 해제</button>
+            </div>
+        </div>
+        <table id="results-table">
+            <thead>
+            <tr>
+                <th style="width:36px"></th>
+                <th>제목</th>
+                <th style="width:140px">출처</th>
+                <th style="width:160px">게시 시각</th>
+                <th style="width:100px">검색어</th>
+            </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+        </table>
+    </section>
+
+    <section id="mail-section" class="card">
+        <h2>메일 발송</h2>
+        <label for="sender-name">보내는 사람 이름</label>
+        <input type="text" id="sender-name">
+
+        <label for="sender-email">보내는 사람 이메일 <span class="hint">(같은 도메인 내 alias만 가능 — SMTP 권한 필요)</span></label>
+        <input type="text" id="sender-email">
+
+        <label for="recipients">수신자 (세미콜론 <code>;</code>으로 구분 — 추가는 세미콜론 찍고 이어서 입력)</label>
+        <textarea id="recipients" rows="3" placeholder="alice@company.com; bob@company.com"></textarea>
+
+        <label for="subject">제목</label>
+        <input type="text" id="subject">
+
+        <label for="intro">본문 서두</label>
+        <textarea id="intro" rows="3"></textarea>
+
+        <label for="signature">본문 말미 (서명)</label>
+        <textarea id="signature" rows="10"></textarea>
+
+        <label for="attachments-input">첨부파일 <span class="hint">(여러 개 선택 가능 / 총 25MB 이하)</span></label>
+        <input type="file" id="attachments-input" multiple>
+        <div id="attachment-list" class="attachment-list"></div>
+
+        <div class="row">
+            <button id="btn-send">메일 보내기</button>
+            <span id="send-status" class="status"></span>
+        </div>
+    </section>
+</div>
+
+<!-- 미리보기 모달 -->
+<div id="preview-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-window">
+        <div class="modal-header">
+            <h3>메일 미리보기</h3>
+            <div class="preview-meta">
+                <div><strong>보내는 사람</strong>: <span id="preview-sender"></span></div>
+                <div><strong>받는 사람</strong> <span id="preview-recipients-count"></span>: <span id="preview-recipients"></span></div>
+                <div><strong>제목</strong>: <span id="preview-subject"></span></div>
+                <div id="preview-attachments-row" class="hidden"><strong>첨부</strong>: <span id="preview-attachments"></span></div>
+            </div>
+        </div>
+        <div class="preview-edit-hint">본문을 직접 클릭하여 편집할 수 있습니다. (Ctrl+B 굵게 / Ctrl+I 기울임 / Ctrl+U 밑줄 / Ctrl+Z 되돌리기)</div>
+        <div id="preview-editor-wrap">
+            <div id="preview-editor" contenteditable="true"></div>
+        </div>
+        <div class="modal-footer">
+            <span id="modal-status" class="status"></span>
+            <div class="modal-actions">
+                <button id="btn-cancel" class="ghost">취소</button>
+                <button id="btn-confirm">확인 (발송)</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const state = { articles: [], attachments: [] };
+    const MAX_ATTACH_TOTAL = 25 * 1024 * 1024;
+
+    function fmtSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+    }
+
+    function totalAttachmentSize() {
+        return state.attachments.reduce((s, f) => s + f.size, 0);
+    }
+
+    function renderAttachmentList() {
+        const el = document.getElementById('attachment-list');
+        if (state.attachments.length === 0) { el.innerHTML = ''; return; }
+        const total = totalAttachmentSize();
+        let html = '<div class="attach-total">총 ' + state.attachments.length + '개 / ' + fmtSize(total) + '</div>';
+        state.attachments.forEach((f, i) => {
+            html += '<div class="attach-item"><span class="attach-name">' + escapeHtml(f.name) + '</span>'
+                 + '<span class="attach-size">' + fmtSize(f.size) + '</span>'
+                 + '<button type="button" class="attach-remove" data-idx="' + i + '">제거</button></div>';
+        });
+        el.innerHTML = html;
+        el.querySelectorAll('.attach-remove').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.attachments.splice(parseInt(btn.dataset.idx, 10), 1);
+                renderAttachmentList();
+            });
+        });
+    }
+
+    function addAttachments(files) {
+        for (const f of files) state.attachments.push(f);
+        if (totalAttachmentSize() > MAX_ATTACH_TOTAL) {
+            alert('총 크기가 25MB를 초과했습니다. 일부 파일이 거부될 수 있습니다.');
+        }
+        renderAttachmentList();
+    }
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(el, text, type = '') {
+        el.textContent = text;
+        el.className = 'status ' + type;
+    }
+
+    function fmtDate(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+    }
+
+    async function loadSettings() {
+        try {
+            const res = await fetch('/api/settings');
+            const data = await res.json();
+            $('recipients').value = data.recipients || '';
+            $('sender-name').value = data.sender_name_default || '';
+            $('sender-email').value = data.sender_email_default || '';
+            $('subject').value = data.subject_default || '';
+            $('intro').value = data.intro_default || '';
+            $('signature').value = data.signature_default || '';
+        } catch (e) {
+            // 실패해도 계속 — 사용자가 수동 입력 가능
+        }
+    }
+
+    function renderResults(articles) {
+        state.articles = articles;
+        const body = $('results-body');
+        body.innerHTML = '';
+        articles.forEach((a, idx) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input type="checkbox" data-idx="${idx}"></td>
+                <td><a href="${escapeHtml(a.link)}" target="_blank" rel="noopener">${escapeHtml(a.title)}</a></td>
+                <td>${escapeHtml(a.source)}</td>
+                <td>${fmtDate(a.pub_date)}</td>
+                <td>${escapeHtml(a.keyword)}</td>
+            `;
+            body.appendChild(tr);
+        });
+        $('results-summary').textContent = `${articles.length}개 기사`;
+        $('results-section').classList.remove('hidden');
+        $('mail-section').classList.remove('hidden');
+    }
+
+    async function doSearch() {
+        const keywords = $('keywords').value.trim();
+        const perKeyword = parseInt($('per-keyword').value, 10) || 5;
+        if (!keywords) {
+            setStatus($('search-status'), '검색어를 입력하세요.', 'error');
+            return;
+        }
+        setStatus($('search-status'), '검색 중...', 'loading');
+        $('btn-search').disabled = true;
+        try {
+            const res = await fetch('/api/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keywords, per_keyword: perKeyword }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || '검색 실패');
+            renderResults(data.articles);
+            setStatus($('search-status'), `완료 — ${data.articles.length}개`, 'success');
+        } catch (e) {
+            setStatus($('search-status'), '에러: ' + e.message, 'error');
+        } finally {
+            $('btn-search').disabled = false;
+        }
+    }
+
+    function collectChecked() {
+        const checks = document.querySelectorAll('#results-body input[type=checkbox]:checked');
+        return Array.from(checks).map(c => state.articles[parseInt(c.dataset.idx, 10)]);
+    }
+
+    function readMailInputs() {
+        return {
+            recipients: $('recipients').value.trim(),
+            sender_name: $('sender-name').value.trim(),
+            sender_email: $('sender-email').value.trim(),
+            subject: $('subject').value.trim(),
+            intro: $('intro').value,
+            signature: $('signature').value,
+        };
+    }
+
+    async function openPreview() {
+        const picked = collectChecked();
+        if (picked.length === 0) { setStatus($('send-status'), '체크된 기사가 없습니다.', 'error'); return; }
+        const { recipients, sender_name, sender_email, subject, intro, signature } = readMailInputs();
+        if (!recipients) { setStatus($('send-status'), '수신자를 입력하세요.', 'error'); return; }
+        if (!subject) { setStatus($('send-status'), '제목을 입력하세요.', 'error'); return; }
+
+        setStatus($('send-status'), '미리보기 생성 중...', 'loading');
+        try {
+            const res = await fetch('/api/preview', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ articles: picked, intro, signature }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || '미리보기 실패');
+
+            const count = recipients.split(';').filter(s => s.trim()).length;
+            $('preview-recipients-count').textContent = `(${count}명)`;
+            $('preview-recipients').textContent = recipients;
+            $('preview-subject').textContent = subject;
+            const senderLabel = (sender_name || '(이름 없음)') + (sender_email ? ` <${sender_email}>` : '');
+            $('preview-sender').textContent = senderLabel;
+            const row = $('preview-attachments-row');
+            if (state.attachments.length > 0) {
+                $('preview-attachments').textContent = state.attachments.length + '개 (' + fmtSize(totalAttachmentSize()) + ') — '
+                    + state.attachments.map(f => f.name).join(', ');
+                row.classList.remove('hidden');
+            } else {
+                row.classList.add('hidden');
+            }
+            const editor = $('preview-editor');
+            editor.setAttribute('style', data.body_style || '');
+            editor.innerHTML = data.html_fragment || '';
+            setStatus($('modal-status'), '', '');
+            $('preview-modal').classList.remove('hidden');
+            setStatus($('send-status'), '', '');
+        } catch (e) {
+            setStatus($('send-status'), '에러: ' + e.message, 'error');
+        }
+    }
+
+    function closePreview() {
+        $('preview-modal').classList.add('hidden');
+        $('preview-editor').innerHTML = '';
+    }
+
+    async function doSend() {
+        const picked = collectChecked();
+        const { recipients, sender_name, sender_email, subject, intro, signature } = readMailInputs();
+
+        setStatus($('modal-status'), '발송 중...', 'loading');
+        $('btn-confirm').disabled = true;
+        $('btn-cancel').disabled = true;
+        try {
+            const editedFragment = $('preview-editor').innerHTML;
+            const fd = new FormData();
+            fd.append('recipients', recipients);
+            fd.append('sender_name', sender_name);
+            fd.append('sender_email', sender_email);
+            fd.append('subject', subject);
+            fd.append('intro', intro);
+            fd.append('signature', signature);
+            fd.append('html_fragment', editedFragment);
+            fd.append('articles', JSON.stringify(picked));
+            state.attachments.forEach(f => fd.append('attachments', f, f.name));
+            const res = await fetch('/api/send', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || '발송 실패');
+            setStatus($('modal-status'), `발송 완료 (${data.sent_count}명) — 잠시 후 닫힙니다.`, 'success');
+            // 발송 후 첨부 초기화 (반복 발송 시 중복 방지)
+            state.attachments = [];
+            renderAttachmentList();
+            setTimeout(() => {
+                closePreview();
+                setStatus($('send-status'), `발송 완료 (${data.sent_count}명)`, 'success');
+            }, 1200);
+        } catch (e) {
+            setStatus($('modal-status'), '에러: ' + e.message, 'error');
+        } finally {
+            $('btn-confirm').disabled = false;
+            $('btn-cancel').disabled = false;
+        }
+    }
+
+    // 이벤트 바인딩
+    $('btn-search').addEventListener('click', doSearch);
+    $('btn-send').addEventListener('click', openPreview);
+    $('btn-cancel').addEventListener('click', closePreview);
+    $('btn-confirm').addEventListener('click', doSend);
+    $('btn-check-all').addEventListener('click', () => {
+        document.querySelectorAll('#results-body input[type=checkbox]').forEach(c => c.checked = true);
+    });
+    $('btn-uncheck-all').addEventListener('click', () => {
+        document.querySelectorAll('#results-body input[type=checkbox]').forEach(c => c.checked = false);
+    });
+    document.querySelector('#preview-modal .modal-backdrop').addEventListener('click', closePreview);
+    $('attachments-input').addEventListener('change', (e) => {
+        addAttachments(Array.from(e.target.files));
+        e.target.value = '';  // 같은 파일 재선택 가능하게
+    });
+
+    // 초기 설정 로드
+    loadSettings();
+</script>
+</body>
+</html>

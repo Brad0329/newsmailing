@@ -27,7 +27,7 @@ def _render_block(text: str) -> str:
 
 _BODY_STYLE = (
     "font-family:-apple-system,'Segoe UI','Malgun Gothic',sans-serif; "
-    "color:#222; max-width:720px; margin:0 auto; padding:16px;"
+    "color:#222; max-width:720px; margin:0; padding:16px;"
 )
 
 

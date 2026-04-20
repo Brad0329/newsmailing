@@ -68,6 +68,69 @@ def save_mail_fields(fields: dict) -> None:
     _save(data)
 
 
+# ---------- 저장된 메일 리스트 (여러 개, 이름 붙여서) ----------
+
+
+def load_mailing_lists() -> list[dict]:
+    """[{name, recipients}, ...] 이름 오름차순."""
+    data = _load()
+    lists = data.get("mailing_lists") or []
+    if not isinstance(lists, list):
+        return []
+    # 구조 방어
+    cleaned = []
+    for item in lists:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        recipients = str(item.get("recipients") or "")
+        if name:
+            cleaned.append({"name": name, "recipients": recipients})
+    cleaned.sort(key=lambda e: e["name"])
+    return cleaned
+
+
+def save_mailing_list(name: str, recipients: str) -> None:
+    """같은 이름 있으면 덮어쓰기, 없으면 추가."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("리스트 이름이 비어 있습니다.")
+    data = _load()
+    lists = data.get("mailing_lists") or []
+    if not isinstance(lists, list):
+        lists = []
+    found = False
+    for item in lists:
+        if isinstance(item, dict) and str(item.get("name") or "").strip() == name:
+            item["recipients"] = recipients or ""
+            found = True
+            break
+    if not found:
+        lists.append({"name": name, "recipients": recipients or ""})
+    data["mailing_lists"] = lists
+    _save(data)
+
+
+def delete_mailing_list(name: str) -> bool:
+    """삭제 성공 여부 반환."""
+    name = (name or "").strip()
+    if not name:
+        return False
+    data = _load()
+    lists = data.get("mailing_lists") or []
+    if not isinstance(lists, list):
+        return False
+    new_lists = [
+        item for item in lists
+        if not (isinstance(item, dict) and str(item.get("name") or "").strip() == name)
+    ]
+    if len(new_lists) == len(lists):
+        return False
+    data["mailing_lists"] = new_lists
+    _save(data)
+    return True
+
+
 # ---------- 발송 내역 ----------
 
 

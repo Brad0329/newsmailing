@@ -54,6 +54,17 @@
         <input type="text" id="sender-email">
 
         <label for="recipients">수신자 (세미콜론 <code>;</code>으로 구분 — 추가는 세미콜론 찍고 이어서 입력)</label>
+        <div class="ml-toolbar">
+            <select id="ml-select">
+                <option value="">-- 저장된 리스트 선택 --</option>
+            </select>
+            <button type="button" id="btn-ml-load" class="ghost">불러오기</button>
+            <button type="button" id="btn-ml-delete" class="ghost danger">삭제</button>
+            <span class="ml-sep"></span>
+            <input type="text" id="ml-name" class="ml-name-input" placeholder="리스트 이름">
+            <button type="button" id="btn-ml-save" class="ghost">현재 내용 저장</button>
+            <span id="ml-status" class="status"></span>
+        </div>
         <textarea id="recipients" rows="3" placeholder="alice@company.com; bob@company.com"></textarea>
 
         <label for="subject">제목</label>
@@ -161,6 +172,86 @@
         return String(s).replace(/[&<>"']/g, (c) => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         }[c]));
+    }
+
+    // ---------- 메일 리스트 관리 ----------
+    const mlState = { lists: [] };
+
+    function renderMailingListSelect() {
+        const sel = $('ml-select');
+        const prev = sel.value;
+        sel.innerHTML = '<option value="">-- 저장된 리스트 선택 --</option>'
+            + mlState.lists.map(l => {
+                const count = l.recipients.split(';').filter(s => s.trim()).length;
+                return `<option value="${escapeHtml(l.name)}">${escapeHtml(l.name)} (${count}명)</option>`;
+            }).join('');
+        // 이전 선택 유지 시도
+        if (prev && mlState.lists.some(l => l.name === prev)) sel.value = prev;
+    }
+
+    async function fetchMailingLists() {
+        try {
+            const res = await fetch('/api/mailing-lists');
+            const data = await res.json();
+            if (data.success) {
+                mlState.lists = data.lists || [];
+                renderMailingListSelect();
+            }
+        } catch (e) { /* 무시 — UI 비어있음 */ }
+    }
+
+    async function saveMailingList() {
+        const name = $('ml-name').value.trim();
+        const recipients = $('recipients').value.trim();
+        if (!name) { setStatus($('ml-status'), '이름을 입력하세요.', 'error'); return; }
+        if (!recipients) { setStatus($('ml-status'), '수신자가 비어 있습니다.', 'error'); return; }
+        const exists = mlState.lists.some(l => l.name === name);
+        if (exists && !confirm(`"${name}" 리스트가 이미 있습니다. 덮어쓸까요?`)) return;
+        setStatus($('ml-status'), '저장 중...', 'loading');
+        try {
+            const res = await fetch('/api/mailing-lists', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name, recipients }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || '저장 실패');
+            mlState.lists = data.lists || [];
+            renderMailingListSelect();
+            $('ml-select').value = name;
+            $('ml-name').value = '';
+            setStatus($('ml-status'), `저장 완료: ${name}`, 'success');
+        } catch (e) {
+            setStatus($('ml-status'), '에러: ' + e.message, 'error');
+        }
+    }
+
+    function loadMailingList() {
+        const name = $('ml-select').value;
+        if (!name) { setStatus($('ml-status'), '불러올 리스트를 선택하세요.', 'error'); return; }
+        const entry = mlState.lists.find(l => l.name === name);
+        if (!entry) return;
+        const current = $('recipients').value.trim();
+        if (current && !confirm('현재 수신자 내용이 덮어씌워집니다. 계속할까요?')) return;
+        $('recipients').value = entry.recipients;
+        setStatus($('ml-status'), `"${name}" 불러옴`, 'success');
+    }
+
+    async function deleteMailingList() {
+        const name = $('ml-select').value;
+        if (!name) { setStatus($('ml-status'), '삭제할 리스트를 선택하세요.', 'error'); return; }
+        if (!confirm(`"${name}" 리스트를 삭제할까요? (되돌릴 수 없습니다)`)) return;
+        setStatus($('ml-status'), '삭제 중...', 'loading');
+        try {
+            const res = await fetch('/api/mailing-lists?name=' + encodeURIComponent(name), { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || '삭제 실패');
+            mlState.lists = data.lists || [];
+            renderMailingListSelect();
+            setStatus($('ml-status'), `삭제됨: ${name}`, 'success');
+        } catch (e) {
+            setStatus($('ml-status'), '에러: ' + e.message, 'error');
+        }
     }
 
     async function loadSettings() {
@@ -343,8 +434,13 @@
         e.target.value = '';  // 같은 파일 재선택 가능하게
     });
 
+    $('btn-ml-load').addEventListener('click', loadMailingList);
+    $('btn-ml-save').addEventListener('click', saveMailingList);
+    $('btn-ml-delete').addEventListener('click', deleteMailingList);
+
     // 초기 설정 로드
     loadSettings();
+    fetchMailingLists();
 </script>
 </body>
 </html>

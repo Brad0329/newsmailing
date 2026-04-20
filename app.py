@@ -30,6 +30,35 @@ def api_history():
     return jsonify({"success": True, "entries": storage.load_history()})
 
 
+@app.route("/api/mailing-lists", methods=["GET", "POST", "DELETE"])
+def api_mailing_lists():
+    if request.method == "GET":
+        return jsonify({"success": True, "lists": storage.load_mailing_lists()})
+
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        name = (data.get("name") or "").strip()
+        recipients = data.get("recipients") or ""
+        if not name:
+            return jsonify({"success": False, "error": "이름이 비어 있습니다."}), 400
+        if not recipients.strip():
+            return jsonify({"success": False, "error": "수신자 내용이 비어 있습니다."}), 400
+        try:
+            storage.save_mailing_list(name, recipients)
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        return jsonify({"success": True, "lists": storage.load_mailing_lists()})
+
+    # DELETE
+    name = (request.args.get("name") or "").strip()
+    if not name:
+        return jsonify({"success": False, "error": "삭제할 리스트 이름이 없습니다."}), 400
+    ok = storage.delete_mailing_list(name)
+    if not ok:
+        return jsonify({"success": False, "error": "해당 이름의 리스트를 찾지 못했습니다."}), 404
+    return jsonify({"success": True, "lists": storage.load_mailing_lists()})
+
+
 @app.route("/api/settings", methods=["GET"])
 def api_settings():
     saved = storage.load_mail_fields()

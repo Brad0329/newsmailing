@@ -9,6 +9,7 @@ from paths import app_dir
 _DATA_DIR = app_dir() / "data"
 _SETTINGS_FILE = _DATA_DIR / "settings.json"
 _HISTORY_FILE = _DATA_DIR / "history.json"
+_DOMAIN_MAP_FILE = _DATA_DIR / "domain_map.json"
 
 _KST = timezone(timedelta(hours=9))
 
@@ -169,3 +170,24 @@ def load_history() -> list[dict]:
     """저장된 발송 내역. 최신 발송이 앞에 오도록 반환."""
     history = _load_history()
     return sorted(history, key=lambda e: e.get("sent_at", ""), reverse=True)
+
+
+# ---------- 도메인 → 언론사 매핑 ----------
+
+
+def load_domain_map() -> dict[str, str]:
+    """data/domain_map.json 로드. 없거나 깨지면 빈 dict — 도메인 문자열로 폴백."""
+    if not _DOMAIN_MAP_FILE.exists():
+        return {}
+    try:
+        data = json.loads(_DOMAIN_MAP_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        # 방어적 정규화: key는 소문자, value는 문자열
+        return {
+            str(k).strip().lower(): str(v).strip()
+            for k, v in data.items()
+            if str(k).strip() and str(v).strip()
+        }
+    except (json.JSONDecodeError, OSError):
+        return {}

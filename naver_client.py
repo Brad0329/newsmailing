@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import requests
 
 import config
+import storage
 
 NAVER_NEWS_ENDPOINT = "https://openapi.naver.com/v1/search/news.json"
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -19,40 +20,24 @@ _TAG_RE = re.compile(r"<[^>]+>")
 # 한국 표준시 기준으로 "어제/오늘"을 계산
 KST = timezone(timedelta(hours=9))
 
-# 도메인 → 언론사 매핑 (초기 — Phase 005에서 확장)
-# 여러 도메인이 같은 언론사인 경우 모두 등록
-DOMAIN_TO_SOURCE: dict[str, str] = {
-    "hankyung.com": "한국경제",
-    "mk.co.kr": "매일경제",
-    "mt.co.kr": "머니투데이",
-    "sedaily.com": "서울경제",
-    "etnews.com": "전자신문",
-    "zdnet.co.kr": "ZDNet 코리아",
-    "chosun.com": "조선일보",
-    "joongang.co.kr": "중앙일보",
-    "donga.com": "동아일보",
-    "hani.co.kr": "한겨레",
-    "khan.co.kr": "경향신문",
-    "yna.co.kr": "연합뉴스",
-    "ytn.co.kr": "YTN",
-    "sbs.co.kr": "SBS",
-    "kbs.co.kr": "KBS",
-    "mbc.co.kr": "MBC",
-    "news1.kr": "뉴스1",
-    "newsis.com": "뉴시스",
-    "hansbiz.co.kr": "한스경제",
-    "fnnews.com": "파이낸셜뉴스",
-    "edaily.co.kr": "이데일리",
-    "asiae.co.kr": "아시아경제",
-    "inews24.com": "아이뉴스24",
-    "dt.co.kr": "디지털타임스",
-    "mediapen.com": "미디어펜",
-    "newdaily.co.kr": "뉴데일리",
-    "ajunews.com": "아주경제",
-    "thebell.co.kr": "더벨",
-    "kmib.co.kr": "국민일보",
-    "munhwa.com": "문화일보",
-}
+
+# 도메인 → 언론사 매핑은 data/domain_map.json에서 로드 (storage.load_domain_map).
+# 모듈 로드 시 1회 캐시. 운영 중 갱신이 필요하면 reload_domain_map() 호출.
+_domain_map_cache: dict[str, str] | None = None
+
+
+def _get_domain_map() -> dict[str, str]:
+    global _domain_map_cache
+    if _domain_map_cache is None:
+        _domain_map_cache = storage.load_domain_map()
+    return _domain_map_cache
+
+
+def reload_domain_map() -> dict[str, str]:
+    """파일을 다시 읽어 캐시 갱신. 매핑 파일을 외부에서 편집한 경우 사용."""
+    global _domain_map_cache
+    _domain_map_cache = storage.load_domain_map()
+    return _domain_map_cache
 
 
 @dataclass
@@ -96,7 +81,7 @@ def extract_source(url: str) -> str:
         return url
     # www., news. 등 흔한 서브도메인 제거
     netloc = re.sub(r"^(www|news|biz|sports|m|imnews|v)\.", "", netloc)
-    return DOMAIN_TO_SOURCE.get(netloc, netloc)
+    return _get_domain_map().get(netloc, netloc)
 
 
 def _is_recent(pub_date: datetime, now: datetime | None = None) -> bool:

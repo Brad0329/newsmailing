@@ -106,7 +106,7 @@
 
 - [x] 에러 처리 정리 (Naver API / SMTP / 첨부 크기 413 핸들러)
 - [ ] 수신자/키워드 이메일 정규식 유효성 검사 (이월)
-- [ ] 도메인→언론사 매핑 확장 30→50개 (이월)
+- [x] 도메인→언론사 매핑 외부화 + 확장 (30→96개, `data/domain_map.json`) — 2026-04-22
 - [x] 매뉴얼 작성 (`manual.md` — README 대체, 운영 체크리스트 포함)
 - [x] End-to-end 실 발송 검증 (pesseq@naver.com 정상, sec@vanasso.kr 스팸함 — DNS 별도 트랙)
 

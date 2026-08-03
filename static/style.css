@@ -243,3 +243,60 @@ code { background: #f1f3f5; padding: 1px 4px; border-radius: 3px; font-size: 12p
     gap: 10px;
 }
 .modal-actions { display: flex; gap: 8px; }
+
+.schedule-controls {
+    padding: 10px 18px;
+    border-top: 1px solid #edeff3;
+    background: #f8f9fb;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    font-size: 13px;
+}
+.schedule-controls input[type=datetime-local] {
+    padding: 5px 8px;
+    border: 1px solid #cfd3d9;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: inherit;
+}
+.schedule-controls .hint { margin-left: auto; }
+
+/* ----- 예약 발송 목록 ----- */
+.scheduled-list { margin-top: 10px; }
+.scheduled-empty { color: #888; font-size: 13px; padding: 6px 2px; }
+.scheduled-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: #fafbfc;
+    border: 1px solid #e6e8ee;
+    border-radius: 4px;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+.scheduled-when { font-weight: 600; color: #1864ab; white-space: nowrap; }
+.scheduled-subject {
+    flex: 1;
+    color: #333;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.scheduled-info { color: #666; font-size: 12px; white-space: nowrap; }
+.scheduled-status { font-size: 11px; padding: 2px 6px; border-radius: 3px; }
+.scheduled-status.pending { background: #e7f5ff; color: #1864ab; }
+.scheduled-status.missed { background: #fff4e6; color: #d9480f; }
+.scheduled-status.failed { background: #fff0f0; color: #c92a2a; }
+.scheduled-cancel {
+    background: transparent;
+    color: #c92a2a;
+    border: 1px solid #e9b0b0;
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+.scheduled-cancel:hover { background: #fff0f0; }

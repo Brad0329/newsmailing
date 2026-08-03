@@ -84,23 +84,42 @@ def extract_source(url: str) -> str:
     return _get_domain_map().get(netloc, netloc)
 
 
-def _is_recent(pub_date: datetime, now: datetime | None = None) -> bool:
-    """어제 00:00(KST) ~ 현재(KST) 사이인지."""
+def _calc_range(days: int, now: datetime | None = None) -> tuple[datetime, datetime]:
+    """최근 N일 범위 계산 (KST). days=1이면 오늘 00:00~현재, days=2면 어제 00:00~현재 등."""
     now = now or datetime.now(KST)
-    yesterday_start = (now - timedelta(days=1)).replace(
+    days = max(1, int(days))
+    start = (now - timedelta(days=days - 1)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
-    return yesterday_start <= pub_date.astimezone(KST) <= now
+    return start, now
 
 
-def search_news(query: str, display: int = 30, sort: str = "sim") -> list[dict]:
-    """Naver 뉴스 검색 API 단일 호출. 원본 items 리스트를 반환."""
+def _is_in_range(
+    pub_date: datetime, start_dt: datetime, end_dt: datetime
+) -> bool:
+    p = pub_date.astimezone(KST)
+    return start_dt <= p <= end_dt
+
+
+def _is_recent(pub_date: datetime, now: datetime | None = None) -> bool:
+    """어제 00:00(KST) ~ 현재(KST) 사이인지. (backward-compatible — days=2 고정)"""
+    start, end = _calc_range(2, now=now)
+    return _is_in_range(pub_date, start, end)
+
+
+def search_news(
+    query: str, display: int = 30, sort: str = "sim", start: int = 1
+) -> list[dict]:
+    """Naver 뉴스 검색 API 단일 호출. 원본 items 리스트를 반환.
+
+    start: 1~1000 페이지네이션 오프셋.
+    """
     config.check_naver()
     headers = {
         "X-Naver-Client-Id": config.NAVER_CLIENT_ID,
         "X-Naver-Client-Secret": config.NAVER_CLIENT_SECRET,
     }
-    params = {"query": query, "display": display, "sort": sort}
+    params = {"query": query, "display": display, "sort": sort, "start": start}
     resp = requests.get(NAVER_NEWS_ENDPOINT, headers=headers, params=params, timeout=10)
     resp.raise_for_status()
     return resp.json().get("items", [])
@@ -131,37 +150,55 @@ def filter_recent(articles: list[Article], now: datetime | None = None) -> list[
     return [a for a in articles if _is_recent(a.pub_date, now=now)]
 
 
+_MAX_PAGES = 2  # 키워드당 최대 페이지 수 (display=30 × 2 = 60건 스캔)
+_DISPLAY_PER_PAGE = 30
+
+
 def collect(
     keywords: list[str],
     per_keyword: int = 5,
-    display: int = 30,
+    days: int = 2,
     now: datetime | None = None,
 ) -> list[Article]:
-    """여러 키워드에 대해 기사 수집, 어제/오늘 필터, URL 기준 전역 중복 제거.
+    """여러 키워드에 대해 기사 수집, 날짜 범위 필터, URL 기준 전역 중복 제거.
 
-    - 각 키워드에 대해 Naver 검색 호출
-    - pubDate로 어제~오늘 필터
-    - 동일 URL이 여러 키워드에서 나오면 첫 번째만 유지 (키워드 정보도 첫 것 유지)
-    - 키워드별 최대 per_keyword 개
+    - `sort=date` + `start` 페이지네이션으로 최신→오래된 순 스캔
+    - 각 키워드당 최대 _MAX_PAGES 페이지(60건)만 보고 그 안에서 per_keyword개 수집
+    - pub_date가 범위 시작 이전으로 내려가면 조기 종료 (API 절약)
+    - 동일 URL이 여러 키워드에서 나오면 첫 번째만 유지
     """
+    range_start, range_end = _calc_range(days, now=now)
     seen_urls: set[str] = set()
     result: list[Article] = []
     for kw in keywords:
         kw = kw.strip()
         if not kw:
             continue
-        items = search_news(kw, display=display)
-        candidates = _items_to_articles(items, keyword=kw)
-        candidates = filter_recent(candidates, now=now)
-        # 키워드 내에서는 게시 최신순 정렬
-        candidates.sort(key=lambda a: a.pub_date, reverse=True)
         picked = 0
-        for a in candidates:
-            if picked >= per_keyword:
+        stop_older = False
+        for page in range(_MAX_PAGES):
+            start_pos = 1 + page * _DISPLAY_PER_PAGE
+            items = search_news(
+                kw, display=_DISPLAY_PER_PAGE, sort="date", start=start_pos
+            )
+            if not items:
                 break
-            if a.link in seen_urls:
-                continue
-            seen_urls.add(a.link)
-            result.append(a)
-            picked += 1
+            articles = _items_to_articles(items, keyword=kw)
+            for a in articles:
+                p = a.pub_date.astimezone(KST)
+                if p > range_end:
+                    # sort=date 기준으론 보통 안 나오지만 방어적 skip
+                    continue
+                if p < range_start:
+                    stop_older = True
+                    break
+                if a.link in seen_urls:
+                    continue
+                seen_urls.add(a.link)
+                result.append(a)
+                picked += 1
+                if picked >= per_keyword:
+                    break
+            if picked >= per_keyword or stop_older:
+                break
     return result

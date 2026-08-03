@@ -81,8 +81,13 @@ def assemble_bundle():
         if src.exists():
             shutil.copy2(src, BUNDLE / name)
 
-    # 빈 data 폴더 (런타임 settings.json/history.json 생성 위치)
-    (BUNDLE / "data").mkdir(exist_ok=True)
+    # data 폴더 (런타임 settings.json/history.json 생성 위치)
+    # domain_map.json은 배포 baseline으로 함께 포함
+    bundle_data = BUNDLE / "data"
+    bundle_data.mkdir(exist_ok=True)
+    domain_map_src = ROOT / "data" / "domain_map.json"
+    if domain_map_src.exists():
+        shutil.copy2(domain_map_src, bundle_data / "domain_map.json")
 
     # 아이콘 ico 는 빌드 부산물 - 제거
     if ICON_ICO.exists():

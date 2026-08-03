@@ -1,5 +1,7 @@
 """newsmailing Flask 엔트리포인트."""
 import json
+import os
+from datetime import datetime, timedelta, timezone
 
 from flask import Flask, jsonify, render_template, request
 
@@ -7,7 +9,10 @@ import config
 import defaults
 import mailer
 import naver_client
+import scheduler
 import storage
+
+_KST = timezone(timedelta(hours=9))
 
 app = Flask(__name__)
 
@@ -81,6 +86,13 @@ def api_search():
     data = request.get_json(silent=True) or {}
     raw = (data.get("keywords") or "").strip()
     per_keyword = int(data.get("per_keyword") or 5)
+    # 검색 기간 (최근 N일, 1~5). 범위 밖 값은 디폴트 2로 보정.
+    try:
+        days = int(data.get("days") or 2)
+    except (TypeError, ValueError):
+        days = 2
+    if days < 1 or days > 5:
+        days = 2
 
     if not raw:
         return jsonify({"success": False, "error": "검색어가 비어 있습니다."}), 400
@@ -90,7 +102,7 @@ def api_search():
         return jsonify({"success": False, "error": "유효한 검색어가 없습니다."}), 400
 
     try:
-        articles = naver_client.collect(keywords, per_keyword=per_keyword)
+        articles = naver_client.collect(keywords, per_keyword=per_keyword, days=days)
     except config.ConfigError as e:
         return jsonify({"success": False, "error": str(e)}), 500
     except Exception as e:
@@ -113,15 +125,63 @@ def api_preview():
     articles = data.get("articles") or []
     intro = data.get("intro") or ""
     signature = data.get("signature") or ""
-    if not isinstance(articles, list) or not articles:
-        return jsonify({"success": False, "error": "선택된 기사가 없습니다."}), 400
+    if not isinstance(articles, list):
+        articles = []
+    # articles가 비어 있어도 인트로+서명만으로 미리보기 생성 허용
     fragment = mailer.render_body_fragment(articles, intro, signature)
     return jsonify({"success": True, "html_fragment": fragment, "body_style": mailer._BODY_STYLE})
 
 
 @app.route("/api/send", methods=["POST"])
 def api_send():
-    # multipart(첨부 있는 경우)와 JSON(첨부 없는 경우) 양쪽 지원
+    p = _parse_send_payload()
+    # articles 비어 있어도 발송 허용 (인트로/본문/서명만으로 메일 작성 가능)
+    if not p["subject"]:
+        return jsonify({"success": False, "error": "제목이 비어 있습니다."}), 400
+
+    recipients = mailer.parse_recipients(p["recipients_raw"])
+    if not recipients:
+        return jsonify({"success": False, "error": "유효한 수신자가 없습니다."}), 400
+
+    try:
+        sent_count = mailer.send(
+            recipients,
+            p["subject"],
+            p["articles"],
+            intro=p["intro"],
+            signature=p["signature"],
+            sender_name=p["sender_name"],
+            sender_email=p["sender_email"],
+            html_fragment=p["html_fragment"],
+            attachments=p["attachments"],
+        )
+    except config.ConfigError as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"success": False, "error": f"발송 실패: {e}"}), 500
+
+    # 성공 시 메일 카드 필드 전체 저장 + 발송 내역 기록
+    storage.save_recipients(p["recipients_raw"])
+    storage.save_mail_fields(
+        {
+            "sender_name": p["sender_name"],
+            "sender_email": p["sender_email"],
+            "subject": p["subject"],
+            "intro": p["intro"],
+            "signature": p["signature"],
+        }
+    )
+    storage.append_history(
+        subject=p["subject"],
+        recipients_count=len(recipients),
+        sent_count=sent_count,
+    )
+
+    return jsonify({"success": True, "sent_count": sent_count})
+
+
+def _parse_send_payload() -> dict:
+    """/api/send 와 /api/schedule 가 공통으로 쓰는 payload 파서."""
     is_multipart = (request.content_type or "").startswith("multipart/")
     attachments: list[mailer.Attachment] = []
     if is_multipart:
@@ -133,6 +193,7 @@ def api_send():
         sender_name = (f.get("sender_name") or "").strip()
         sender_email = (f.get("sender_email") or "").strip()
         html_fragment = f.get("html_fragment")
+        scheduled_at = (f.get("scheduled_at") or "").strip()
         try:
             articles = json.loads(f.get("articles") or "[]")
         except json.JSONDecodeError:
@@ -153,52 +214,109 @@ def api_send():
         sender_name = (data.get("sender_name") or "").strip()
         sender_email = (data.get("sender_email") or "").strip()
         html_fragment = data.get("html_fragment")
+        scheduled_at = (data.get("scheduled_at") or "").strip()
         articles = data.get("articles") or []
 
-    if not isinstance(articles, list) or not articles:
-        return jsonify({"success": False, "error": "선택된 기사가 없습니다."}), 400
-    if not subject:
-        return jsonify({"success": False, "error": "제목이 비어 있습니다."}), 400
+    if not isinstance(articles, list):
+        articles = []
 
-    recipients = mailer.parse_recipients(recipients_raw)
+    return {
+        "recipients_raw": recipients_raw,
+        "subject": subject,
+        "intro": intro,
+        "signature": signature,
+        "sender_name": sender_name,
+        "sender_email": sender_email,
+        "html_fragment": html_fragment,
+        "scheduled_at": scheduled_at,
+        "articles": articles,
+        "attachments": attachments,
+    }
+
+
+@app.route("/api/schedule", methods=["POST"])
+def api_schedule():
+    """미래 시각에 실행될 예약 발송을 저장 + APScheduler 등록."""
+    p = _parse_send_payload()
+    if not p["subject"]:
+        return jsonify({"success": False, "error": "제목이 비어 있습니다."}), 400
+    if not p["scheduled_at"]:
+        return jsonify({"success": False, "error": "예약 시각이 비어 있습니다."}), 400
+
+    recipients = mailer.parse_recipients(p["recipients_raw"])
     if not recipients:
         return jsonify({"success": False, "error": "유효한 수신자가 없습니다."}), 400
 
+    # 시각 파싱: 브라우저 `datetime-local`은 타임존 없음 → KST로 해석
     try:
-        sent_count = mailer.send(
-            recipients,
-            subject,
-            articles,
-            intro=intro,
-            signature=signature,
-            sender_name=sender_name,
-            sender_email=sender_email,
-            html_fragment=html_fragment,
-            attachments=attachments,
-        )
-    except config.ConfigError as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-    except Exception as e:
-        return jsonify({"success": False, "error": f"발송 실패: {e}"}), 500
+        raw_dt = p["scheduled_at"]
+        dt = datetime.fromisoformat(raw_dt)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_KST)
+    except ValueError:
+        return jsonify({"success": False, "error": "예약 시각 형식이 올바르지 않습니다."}), 400
 
-    # 성공 시 메일 카드 필드 전체 저장 + 발송 내역 기록
-    storage.save_recipients(recipients_raw)
+    if dt <= datetime.now(_KST) + timedelta(seconds=5):
+        return jsonify({"success": False, "error": "예약 시각은 현재보다 미래여야 합니다."}), 400
+
+    scheduled_at_iso = dt.isoformat(timespec="seconds")
+
+    meta = {
+        "recipients": p["recipients_raw"],
+        "subject": p["subject"],
+        "intro": p["intro"],
+        "signature": p["signature"],
+        "sender_name": p["sender_name"],
+        "sender_email": p["sender_email"],
+        "html_fragment": p["html_fragment"],
+        "articles": p["articles"],
+        "scheduled_at": scheduled_at_iso,
+    }
+
+    schedule_id = storage.create_scheduled(meta, attachments=p["attachments"])
+    try:
+        scheduler.register(schedule_id, scheduled_at_iso)
+    except Exception as e:
+        # 스케줄러 등록 실패 → 저장한 폴더 정리
+        storage.delete_scheduled(schedule_id)
+        return jsonify({"success": False, "error": f"예약 등록 실패: {e}"}), 500
+
+    # 입력값 저장 (즉시 발송과 동일)
+    storage.save_recipients(p["recipients_raw"])
     storage.save_mail_fields(
         {
-            "sender_name": sender_name,
-            "sender_email": sender_email,
-            "subject": subject,
-            "intro": intro,
-            "signature": signature,
+            "sender_name": p["sender_name"],
+            "sender_email": p["sender_email"],
+            "subject": p["subject"],
+            "intro": p["intro"],
+            "signature": p["signature"],
         }
     )
-    storage.append_history(
-        subject=subject,
-        recipients_count=len(recipients),
-        sent_count=sent_count,
+
+    return jsonify(
+        {
+            "success": True,
+            "schedule_id": schedule_id,
+            "scheduled_at": scheduled_at_iso,
+            "recipients_count": len(recipients),
+        }
     )
 
-    return jsonify({"success": True, "sent_count": sent_count})
+
+@app.route("/api/scheduled", methods=["GET"])
+def api_scheduled_list():
+    """예약 목록. 각 항목에 최소한의 표시 정보 포함 (첨부 바이너리 제외)."""
+    items = storage.list_scheduled()
+    # 표시용 투영 — 민감정보는 그대로 두되 UI가 쓰는 필드만 추리지는 않음
+    return jsonify({"success": True, "items": items})
+
+
+@app.route("/api/scheduled/<schedule_id>", methods=["DELETE"])
+def api_scheduled_delete(schedule_id: str):
+    ok = scheduler.cancel(schedule_id)
+    if not ok:
+        return jsonify({"success": False, "error": "해당 예약을 찾을 수 없습니다."}), 404
+    return jsonify({"success": True})
 
 
 @app.errorhandler(413)
@@ -206,5 +324,13 @@ def too_large(_):
     return jsonify({"success": False, "error": "첨부파일 총 크기가 너무 큽니다 (최대 25MB)."}), 413
 
 
+def start_scheduler() -> None:
+    """앱 구동 시 1회 호출. 테스트 import 시엔 자동 시작하지 않도록 명시적 호출 방식."""
+    scheduler.init()
+
+
 if __name__ == "__main__":
+    # Flask debug reloader가 부모 프로세스에서 중복 시작하는 것 방지
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not config.FLASK_DEBUG:
+        start_scheduler()
     app.run(host=config.FLASK_HOST, port=config.FLASK_PORT, debug=config.FLASK_DEBUG)

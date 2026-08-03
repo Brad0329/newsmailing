@@ -120,7 +120,43 @@
 - [x] 발신자 이메일 alias 지원
 - [x] 첨부파일 (다중, 누적, 크기 제한)
 
-### (선택적 확장) Phase 006 — LLM 기반 관련성 랭킹
+### Phase 006 — 검색 기간 / 기사 없이 발송 / 예약 발송
+
+기능 3종 묶음. 상세 로그는 완료 시 `work_log/Phase_006.md`에 기록.
+
+**2. 검색 기간 선택**
+- [x] UI: `<select>` "최근 N일" 1~5 (기본 2 = 어제+오늘, 기존 동작 유지)
+- [x] `naver_client.collect(keywords, per_keyword=5, days=2)` — 날짜 범위 기반으로 일반화
+- [x] 페이지네이션: `sort=date` + `start` 증가, `display=30`, 키워드당 **최대 2페이지(60건)** 스캔
+- [x] 수집 로직: `pub_date < range_start` 도달 시 조기 종료 (API 절약)
+- [x] `/api/search`에 `days` 파라미터 추가 (검증 1~5)
+
+**3. 기사 없이 메일 발송**
+- [x] 체크 0개여도 "미리보기/메일 보내기" 활성화
+- [x] `render_body_fragment()` — 기사 섹션 비면 해당 영역 생략 (인트로+서명만)
+- [x] 프론트 검증: 체크 없음 에러 제거, 본문 편집 흐름으로 자연스럽게 연결
+
+**1. 예약 발송**
+- [x] 모달에 `[○ 즉시] [○ 예약]` 라디오 + `datetime-local`
+- [x] `APScheduler BackgroundScheduler` 도입 (`requirements.txt` 추가)
+- [x] 영속화 구조: `data/scheduled/<id>/meta.json` + `data/scheduled/<id>/attachments/*`
+- [x] `/api/schedule` POST — 메타 저장 + 첨부 파일 보관 + 스케줄러 등록
+- [x] `/api/scheduled` GET — pending 목록
+- [x] `/api/scheduled/<id>` DELETE — 취소 (폴더 삭제 + 스케줄러 해제)
+- [x] 앱 시작 시 pending 재등록 (재기동 지원)
+- [x] 실행 성공 시 폴더 정리, 실패 시 `status=failed` 기록
+- [x] UI 하단에 예약 목록 섹션 (취소 버튼 포함)
+
+**외부 제약**
+- 예약 시각에 exe가 **상주**해야 발송 가능. 꺼져 있으면 다음 기동 시 지난 예약은 즉시 발송할지/스킵할지 정책 결정 필요 → 기본: **지난 예약은 스킵 + UI에 "놓침" 표시**.
+- APScheduler의 persistent jobstore(SQLite) 대신 파일 기반 자체 영속화 채택 — 기존 JSON 패턴과 일관성, SQLite 의존성 회피.
+
+**완료 기준**
+- 기간 N=3 설정 → 최근 3일치 수집 확인
+- 검색 없이 바로 메일 보내기 → 모달 열리고 발송 성공
+- 5분 뒤 예약 → 앱 상주 상태에서 자동 발송, 예약 목록에서 취소 동작 확인
+
+### (선택적 확장) Phase 007 — LLM 기반 관련성 랭킹
 
 초기 버전 사용 후 품질이 아쉬우면 추가. Naver 정확도순 결과(키워드당 10개 후보)를 Claude API로 넘겨 관련성 상위 3개 선택.
 

@@ -66,7 +66,10 @@ def main() -> None:
 
     # config 는 .env 확인 후 import (ConfigError 방지)
     import config
-    from app import app
+    from app import app, start_scheduler
+
+    # 예약 발송 스케줄러 시작 (pending 예약 재등록 + 과거분 missed 마킹)
+    start_scheduler()
 
     host = "127.0.0.1"
     port = _find_free_port(config.FLASK_PORT)

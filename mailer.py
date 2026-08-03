@@ -32,7 +32,10 @@ _BODY_STYLE = (
 
 
 def render_body_fragment(articles: list[dict], intro: str, signature: str) -> str:
-    """`<body>` 내부에 들어갈 컨텐츠 HTML만 반환. 편집 가능한 미리보기에 사용."""
+    """`<body>` 내부에 들어갈 컨텐츠 HTML만 반환. 편집 가능한 미리보기에 사용.
+
+    articles가 비면 기사 섹션 자체를 생략 — 인트로/서명만으로 자유 메일 작성 가능.
+    """
     items = []
     for a in articles:
         title = _esc(a.get("title", ""))
@@ -45,9 +48,7 @@ def render_body_fragment(articles: list[dict], intro: str, signature: str) -> st
             f' / {source}'
             f'</p>'
         )
-    articles_html = "\n".join(items) if items else (
-        '<p style="color:#888;">기사 없음</p>'
-    )
+    articles_html = "\n".join(items)  # 비면 빈 문자열 → 섹션 자체가 사라짐
     intro_html = (
         f'<div style="margin:0 0 16px; color:#333; line-height:1.7;">{_render_block(intro)}</div>'
         if intro else ""
@@ -57,7 +58,8 @@ def render_body_fragment(articles: list[dict], intro: str, signature: str) -> st
         f'{_render_block(signature)}</div>'
         if signature else ""
     )
-    return f"{intro_html}\n{articles_html}\n{signature_html}"
+    parts = [p for p in (intro_html, articles_html, signature_html) if p]
+    return "\n".join(parts)
 
 
 def wrap_document(body_fragment: str) -> str:

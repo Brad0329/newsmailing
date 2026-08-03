@@ -1,8 +1,11 @@
-"""간단한 파일 기반 설정 저장소 — 수신자 리스트 / 발송 내역 지속화."""
+"""간단한 파일 기반 설정 저장소 — 수신자 리스트 / 발송 내역 / 예약 발송 지속화."""
 from __future__ import annotations
 
 import json
+import shutil
+import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from paths import app_dir
 
@@ -10,6 +13,7 @@ _DATA_DIR = app_dir() / "data"
 _SETTINGS_FILE = _DATA_DIR / "settings.json"
 _HISTORY_FILE = _DATA_DIR / "history.json"
 _DOMAIN_MAP_FILE = _DATA_DIR / "domain_map.json"
+_SCHEDULED_DIR = _DATA_DIR / "scheduled"
 
 _KST = timezone(timedelta(hours=9))
 
@@ -191,3 +195,142 @@ def load_domain_map() -> dict[str, str]:
         }
     except (json.JSONDecodeError, OSError):
         return {}
+
+
+# ---------- 예약 발송 ----------
+#
+# 구조:
+#   data/scheduled/<id>/meta.json        (메일 정보 + scheduled_at + status)
+#   data/scheduled/<id>/attachments/*    (첨부 원본 파일)
+#
+# status: pending → done (성공 후 폴더 삭제) / failed / missed
+
+
+def _scheduled_dir(schedule_id: str) -> Path:
+    return _SCHEDULED_DIR / schedule_id
+
+
+def _meta_path(schedule_id: str) -> Path:
+    return _scheduled_dir(schedule_id) / "meta.json"
+
+
+def _attachments_dir(schedule_id: str) -> Path:
+    return _scheduled_dir(schedule_id) / "attachments"
+
+
+def create_scheduled(
+    meta: dict,
+    attachments: list[tuple[str, bytes, str | None]] | None = None,
+) -> str:
+    """새 예약 생성. meta는 recipients/subject/intro/signature/sender_*/html_fragment/articles/scheduled_at 포함.
+
+    반환: 새 schedule_id (uuid4 hex).
+    """
+    schedule_id = uuid.uuid4().hex
+    folder = _scheduled_dir(schedule_id)
+    folder.mkdir(parents=True, exist_ok=True)
+
+    full_meta = dict(meta)
+    full_meta["schedule_id"] = schedule_id
+    full_meta.setdefault("created_at", datetime.now(_KST).isoformat(timespec="seconds"))
+    full_meta.setdefault("status", "pending")
+
+    # 첨부파일 저장 + 메타에 파일명/크기 기록
+    attach_list: list[dict] = []
+    if attachments:
+        att_dir = _attachments_dir(schedule_id)
+        att_dir.mkdir(parents=True, exist_ok=True)
+        for idx, (filename, data, mimetype) in enumerate(attachments):
+            if not filename or not data:
+                continue
+            # 디스크 저장 파일명은 순번 prefix로 충돌 회피
+            safe_name = f"{idx:02d}_{_sanitize_filename(filename)}"
+            (att_dir / safe_name).write_bytes(data)
+            attach_list.append(
+                {
+                    "filename": filename,
+                    "disk_name": safe_name,
+                    "size": len(data),
+                    "mimetype": mimetype or "",
+                }
+            )
+    full_meta["attachments"] = attach_list
+
+    _meta_path(schedule_id).write_text(
+        json.dumps(full_meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return schedule_id
+
+
+def _sanitize_filename(name: str) -> str:
+    # Windows 금지문자 / 경로 구분 제거
+    bad = '<>:"/\\|?*\0'
+    return "".join(c for c in name if c not in bad).strip() or "attachment"
+
+
+def load_scheduled(schedule_id: str) -> dict | None:
+    """메타 로드. 없으면 None. 첨부파일 바이너리는 포함하지 않음 (load_scheduled_attachments 별도)."""
+    path = _meta_path(schedule_id)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def load_scheduled_attachments(
+    schedule_id: str,
+) -> list[tuple[str, bytes, str | None]]:
+    """첨부파일 바이너리 로드. (filename, data, mimetype) 튜플 리스트."""
+    meta = load_scheduled(schedule_id)
+    if not meta:
+        return []
+    att_dir = _attachments_dir(schedule_id)
+    result: list[tuple[str, bytes, str | None]] = []
+    for entry in meta.get("attachments") or []:
+        disk_name = entry.get("disk_name")
+        filename = entry.get("filename") or disk_name
+        mimetype = entry.get("mimetype") or None
+        if not disk_name:
+            continue
+        path = att_dir / disk_name
+        if not path.exists():
+            continue
+        result.append((filename, path.read_bytes(), mimetype))
+    return result
+
+
+def list_scheduled() -> list[dict]:
+    """모든 예약 메타 목록. scheduled_at 오름차순 (가까운 순)."""
+    if not _SCHEDULED_DIR.exists():
+        return []
+    result: list[dict] = []
+    for sub in _SCHEDULED_DIR.iterdir():
+        if not sub.is_dir():
+            continue
+        meta = load_scheduled(sub.name)
+        if meta:
+            result.append(meta)
+    result.sort(key=lambda m: m.get("scheduled_at", ""))
+    return result
+
+
+def update_scheduled_status(schedule_id: str, status: str, **extra) -> None:
+    meta = load_scheduled(schedule_id)
+    if not meta:
+        return
+    meta["status"] = status
+    meta.update(extra)
+    _meta_path(schedule_id).write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def delete_scheduled(schedule_id: str) -> bool:
+    """예약 폴더 전체 삭제. 성공 여부 반환."""
+    folder = _scheduled_dir(schedule_id)
+    if not folder.exists():
+        return False
+    shutil.rmtree(folder, ignore_errors=True)
+    return not folder.exists()

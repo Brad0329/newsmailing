@@ -18,6 +18,14 @@
         <div class="row">
             <label for="per-keyword" class="inline">키워드당 기사 수</label>
             <input type="number" id="per-keyword" value="5" min="1" max="10">
+            <label for="days" class="inline">검색 기간</label>
+            <select id="days">
+                <option value="1">오늘만</option>
+                <option value="2" selected>어제~오늘</option>
+                <option value="3">최근 3일</option>
+                <option value="4">최근 4일</option>
+                <option value="5">최근 5일</option>
+            </select>
             <button id="btn-search">기사 찾기</button>
         </div>
         <div id="search-status" class="status"></div>
@@ -85,6 +93,14 @@
             <span id="send-status" class="status"></span>
         </div>
     </section>
+
+    <section id="scheduled-section" class="card">
+        <div class="row space-between">
+            <h2 style="margin:0;">예약된 발송</h2>
+            <button id="btn-refresh-scheduled" class="ghost">새로고침</button>
+        </div>
+        <div id="scheduled-list" class="scheduled-list"></div>
+    </section>
 </div>
 
 <!-- 미리보기 모달 -->
@@ -103,6 +119,16 @@
         <div class="preview-edit-hint">본문을 직접 클릭하여 편집할 수 있습니다. (Ctrl+B 굵게 / Ctrl+I 기울임 / Ctrl+U 밑줄 / Ctrl+Z 되돌리기)</div>
         <div id="preview-editor-wrap">
             <div id="preview-editor" contenteditable="true"></div>
+        </div>
+        <div class="schedule-controls">
+            <label class="inline">
+                <input type="radio" name="send-mode" value="now" checked> 즉시 발송
+            </label>
+            <label class="inline">
+                <input type="radio" name="send-mode" value="scheduled"> 예약 발송
+            </label>
+            <input type="datetime-local" id="scheduled-at" class="hidden">
+            <span class="hint">※ 예약 시각에 앱이 실행 중이어야 발송됩니다</span>
         </div>
         <div class="modal-footer">
             <span id="modal-status" class="status"></span>
@@ -293,6 +319,7 @@
     async function doSearch() {
         const keywords = $('keywords').value.trim();
         const perKeyword = parseInt($('per-keyword').value, 10) || 5;
+        const days = parseInt($('days').value, 10) || 2;
         if (!keywords) {
             setStatus($('search-status'), '검색어를 입력하세요.', 'error');
             return;
@@ -303,7 +330,7 @@
             const res = await fetch('/api/search', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ keywords, per_keyword: perKeyword }),
+                body: JSON.stringify({ keywords, per_keyword: perKeyword, days }),
             });
             const data = await res.json();
             if (!res.ok || !data.success) throw new Error(data.error || '검색 실패');
@@ -332,9 +359,31 @@
         };
     }
 
+    function setScheduleMode(mode) {
+        const dtInput = $('scheduled-at');
+        if (mode === 'scheduled') {
+            dtInput.classList.remove('hidden');
+            // 디폴트: 현재 시각 + 1시간 (분 단위 반올림)
+            if (!dtInput.value) {
+                const d = new Date(Date.now() + 60 * 60 * 1000);
+                d.setSeconds(0, 0);
+                const pad = (n) => String(n).padStart(2, '0');
+                dtInput.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            }
+            $('btn-confirm').textContent = '확인 (예약)';
+        } else {
+            dtInput.classList.add('hidden');
+            $('btn-confirm').textContent = '확인 (발송)';
+        }
+    }
+
+    function getScheduleMode() {
+        const r = document.querySelector('input[name="send-mode"]:checked');
+        return r ? r.value : 'now';
+    }
+
     async function openPreview() {
-        const picked = collectChecked();
-        if (picked.length === 0) { setStatus($('send-status'), '체크된 기사가 없습니다.', 'error'); return; }
+        const picked = collectChecked();  // 체크 0개여도 허용 — 기사 없이 자유 메일 작성 가능
         const { recipients, sender_name, sender_email, subject, intro, signature } = readMailInputs();
         if (!recipients) { setStatus($('send-status'), '수신자를 입력하세요.', 'error'); return; }
         if (!subject) { setStatus($('send-status'), '제목을 입력하세요.', 'error'); return; }
@@ -367,6 +416,9 @@
             editor.setAttribute('style', data.body_style || '');
             editor.innerHTML = data.html_fragment || '';
             setStatus($('modal-status'), '', '');
+            // 매번 즉시 모드로 리셋 (의도치 않은 예약 방지)
+            document.querySelector('input[name="send-mode"][value="now"]').checked = true;
+            setScheduleMode('now');
             $('preview-modal').classList.remove('hidden');
             setStatus($('send-status'), '', '');
         } catch (e) {
@@ -379,30 +431,36 @@
         $('preview-editor').innerHTML = '';
     }
 
-    async function doSend() {
+    function buildSendFormData(includeScheduledAt = false) {
         const picked = collectChecked();
         const { recipients, sender_name, sender_email, subject, intro, signature } = readMailInputs();
+        const editedFragment = $('preview-editor').innerHTML;
+        const fd = new FormData();
+        fd.append('recipients', recipients);
+        fd.append('sender_name', sender_name);
+        fd.append('sender_email', sender_email);
+        fd.append('subject', subject);
+        fd.append('intro', intro);
+        fd.append('signature', signature);
+        fd.append('html_fragment', editedFragment);
+        fd.append('articles', JSON.stringify(picked));
+        state.attachments.forEach(f => fd.append('attachments', f, f.name));
+        if (includeScheduledAt) {
+            fd.append('scheduled_at', $('scheduled-at').value);
+        }
+        return fd;
+    }
 
+    async function doSend() {
         setStatus($('modal-status'), '발송 중...', 'loading');
         $('btn-confirm').disabled = true;
         $('btn-cancel').disabled = true;
         try {
-            const editedFragment = $('preview-editor').innerHTML;
-            const fd = new FormData();
-            fd.append('recipients', recipients);
-            fd.append('sender_name', sender_name);
-            fd.append('sender_email', sender_email);
-            fd.append('subject', subject);
-            fd.append('intro', intro);
-            fd.append('signature', signature);
-            fd.append('html_fragment', editedFragment);
-            fd.append('articles', JSON.stringify(picked));
-            state.attachments.forEach(f => fd.append('attachments', f, f.name));
+            const fd = buildSendFormData(false);
             const res = await fetch('/api/send', { method: 'POST', body: fd });
             const data = await res.json();
             if (!res.ok || !data.success) throw new Error(data.error || '발송 실패');
             setStatus($('modal-status'), `발송 완료 (${data.sent_count}명) — 잠시 후 닫힙니다.`, 'success');
-            // 발송 후 첨부 초기화 (반복 발송 시 중복 방지)
             state.attachments = [];
             renderAttachmentList();
             setTimeout(() => {
@@ -417,11 +475,101 @@
         }
     }
 
+    async function doSchedule() {
+        const dt = $('scheduled-at').value;
+        if (!dt) { setStatus($('modal-status'), '예약 시각을 선택하세요.', 'error'); return; }
+        const dtObj = new Date(dt);
+        if (!(dtObj.getTime() > Date.now() + 60 * 1000)) {
+            setStatus($('modal-status'), '예약 시각은 최소 1분 이후여야 합니다.', 'error');
+            return;
+        }
+        setStatus($('modal-status'), '예약 등록 중...', 'loading');
+        $('btn-confirm').disabled = true;
+        $('btn-cancel').disabled = true;
+        try {
+            const fd = buildSendFormData(true);
+            const res = await fetch('/api/schedule', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || '예약 실패');
+            setStatus($('modal-status'), `예약 완료 (${data.recipients_count}명, ${fmtDate(data.scheduled_at)})`, 'success');
+            state.attachments = [];
+            renderAttachmentList();
+            fetchScheduled();
+            setTimeout(() => {
+                closePreview();
+                setStatus($('send-status'), `예약 등록됨: ${fmtDate(data.scheduled_at)}`, 'success');
+            }, 1500);
+        } catch (e) {
+            setStatus($('modal-status'), '에러: ' + e.message, 'error');
+        } finally {
+            $('btn-confirm').disabled = false;
+            $('btn-cancel').disabled = false;
+        }
+    }
+
+    function onConfirm() {
+        if (getScheduleMode() === 'scheduled') doSchedule();
+        else doSend();
+    }
+
+    // ---------- 예약 목록 ----------
+    async function fetchScheduled() {
+        try {
+            const res = await fetch('/api/scheduled');
+            const data = await res.json();
+            renderScheduled(data.items || []);
+        } catch (e) {
+            renderScheduled([]);
+        }
+    }
+
+    function renderScheduled(items) {
+        const el = $('scheduled-list');
+        if (!items.length) {
+            el.innerHTML = '<div class="scheduled-empty">예약된 발송이 없습니다.</div>';
+            return;
+        }
+        el.innerHTML = items.map(item => {
+            const status = item.status || 'pending';
+            const count = String(item.recipients || '').split(';').filter(s => s.trim()).length;
+            const att = (item.attachments || []).length;
+            const statusLabel = {pending: '대기', missed: '놓침', failed: '실패'}[status] || status;
+            return `
+                <div class="scheduled-item">
+                    <span class="scheduled-when">${fmtDate(item.scheduled_at)}</span>
+                    <span class="scheduled-subject" title="${escapeHtml(item.subject || '')}">${escapeHtml(item.subject || '(제목 없음)')}</span>
+                    <span class="scheduled-info">${count}명${att ? ' / 첨부 ' + att : ''}</span>
+                    <span class="scheduled-status ${status}">${statusLabel}</span>
+                    <button type="button" class="scheduled-cancel" data-id="${escapeHtml(item.schedule_id)}">삭제</button>
+                </div>
+            `;
+        }).join('');
+        el.querySelectorAll('.scheduled-cancel').forEach(btn => {
+            btn.addEventListener('click', () => cancelScheduled(btn.dataset.id));
+        });
+    }
+
+    async function cancelScheduled(id) {
+        if (!confirm('이 예약을 삭제할까요?')) return;
+        try {
+            const res = await fetch('/api/scheduled/' + encodeURIComponent(id), { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || '삭제 실패');
+            fetchScheduled();
+        } catch (e) {
+            alert('삭제 실패: ' + e.message);
+        }
+    }
+
     // 이벤트 바인딩
     $('btn-search').addEventListener('click', doSearch);
     $('btn-send').addEventListener('click', openPreview);
     $('btn-cancel').addEventListener('click', closePreview);
-    $('btn-confirm').addEventListener('click', doSend);
+    $('btn-confirm').addEventListener('click', onConfirm);
+    document.querySelectorAll('input[name="send-mode"]').forEach(r => {
+        r.addEventListener('change', () => setScheduleMode(r.value));
+    });
+    $('btn-refresh-scheduled').addEventListener('click', fetchScheduled);
     $('btn-check-all').addEventListener('click', () => {
         document.querySelectorAll('#results-body input[type=checkbox]').forEach(c => c.checked = true);
     });
@@ -441,6 +589,7 @@
     // 초기 설정 로드
     loadSettings();
     fetchMailingLists();
+    fetchScheduled();
 </script>
 </body>
 </html>
